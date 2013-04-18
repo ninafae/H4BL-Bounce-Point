@@ -225,6 +225,15 @@ $databases = array (
     ),
   ),
 );
+/**
+ * Acquia MemCache configuration code
+ */
+$conf['cache_backends'][] = './sites/all/modules/memcache/memcache.inc';
+$conf['cache_default_class'] = 'MemCacheDrupal';
+$conf['cache_class_cache_form'] = 'DrupalDatabaseCache';
+/**
+ * @endcode
+ */
 
 /**
  * Access control for update.php script.
