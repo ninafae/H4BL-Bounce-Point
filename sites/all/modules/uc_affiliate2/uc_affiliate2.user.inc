@@ -389,12 +389,13 @@ function uc_affiliate2_commissions($account) {
   $query->fields( 'u', array('name'));
   $query->condition('aid', $account->uid, '=');
   $query->condition('uco.created', array($dates['start'], $dates['end']), 'BETWEEN' );
+
   $result = $query->execute();
   // $result = db_query($sql, $account->uid, $dates['start'], $dates['end']);
 
   $total_sales = 0;
   $total_commission = 0;
-
+  $rows = array();
   foreach ($result as $commission) {
     if ($commission->uid > 0 && user_access('access user profiles')) {
       // $commission['name'] represents the name that you can see when visiting the profile
@@ -420,9 +421,14 @@ function uc_affiliate2_commissions($account) {
     $total_sales += $commission->order_total;
     $total_commission += $commission->commission;
   }
-  $rows[] = array('', '', '', t('Total:'), uc_currency_format($total_sales), uc_currency_format($total_commission));
-
-  $output = theme('table', array('header' => $header, 'rows' => $rows));
+  if ($total_commission > 0) {
+    $rows[] = array('', '', '', t('Total:'), uc_currency_format($total_sales), uc_currency_format($total_commission));
+  }
+  $empty_message = t('No commision has been paid for the period starting');
+  $empty_message .= ' ' . format_date($dates['start'], 'custom', 'F d, Y') . ' ';
+  $empty_message .= t('and ending');
+  $empty_message .= ' ' . format_date($dates['end'], 'custom', 'F d, Y');
+  $output = theme('table', array('header' => $header, 'rows' => $rows, 'empty' => $empty_message));
 
   return $output;
 }
@@ -731,6 +737,7 @@ function uc_affiliate2_orders($account) {
         $u = t('User #') . $order->uid;
       }
     }
+    $total_sales += $order->order_total;
     $rows[] = array(
       $u,
       $order->order_id,
@@ -782,15 +789,6 @@ function uc_affiliate2_downline($account, $level = 1) {
   );
 
   // Create sql to display level of affiliate specified
-  /*
-   * SELECT u1.uid, uc.user_count FROM {users} u1
-   * INNER JOIN {uc_affiliate2_users} au2 ON au2.uid = u2.uid
-   * INNER JOIN {users} u3 ON au2.aid = u3.uid
-   * LEFT OUTER JOIN (SELECT au.aid, COUNT(au.uid) as user_count FROM {uc_affiliate2_users} au GROUP BY au.aid) uc on uc.aid = u1.uid
-   * WHERE u3.uid = 1
-   * @TODO: I could not figure out how to convert the original query, my solution was to break the count
-   * query seperate from the total query, hoping this works properly, it needs testing.
-   */
   $query = db_select('users', 'u1')
   ->fields('u1', array('uid'));
   $next = 1;
@@ -799,28 +797,32 @@ function uc_affiliate2_downline($account, $level = 1) {
     $query->innerjoin('uc_affiliate2_users', 'au' . $i, 'au' . $i . '.uid = u' . $i . '.uid');
     $query->innerjoin('users', 'u' . $next, 'au' . $i . '.aid = u' . $next . '.uid');
   }
-  $query->condition('u1.uid', $account->uid, '=');
+  // user_count subquery
+  $subquery = db_select('uc_affiliate2_users', 'au');
+  $subquery->addField('au', 'aid');
+  $subquery->addExpression('COUNT(au.aid)', 'user_count');
+  $subquery->groupBy('au.aid');
+  // Attach subquery & field
+  $query->leftJoin($subquery, 'uc', 'uc.aid = u1.uid');
+  $query->addField('uc', 'user_count');
+
+  $query->condition('u' . $next . '.uid', $account->uid, '=');
   $query->extend('PagerDefault')->limit(25)->extend('TableSort')->orderByHeader($header);
+
   $result = $query->execute();
 
-  // create the data rows for our table
+  // Create the data rows for our table
   $rows = array();
   foreach ($result as $affiliate) {
-    $user_count = db_select('uc_affiliate2_users', 'au')
-    ->condition('au.aid', $account->uid, '=')
-    ->fields('au', array('aid'))
-    ->countQuery()->execute()->fetchField();
     $downline_user = user_load($affiliate->uid);
-
     $rows[] = array(
       theme('username', array('account' => $downline_user) ),
       user_access('act as affiliate', $downline_user) ? 'Yes' : 'No',
       format_interval(REQUEST_TIME - $downline_user->created),
       $downline_user->access ? t('%time ago', array('%time' => format_interval(REQUEST_TIME - $downline_user->access))) : t('never'),
       $level,
-      $user_count ? $user_count : 0,
+      $affiliate->user_count > 0 ? $affiliate->user_count : 0,
     );
-
   }
 
   // Build the output
